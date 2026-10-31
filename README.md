@@ -19,6 +19,12 @@ Open http://localhost:5173. To try it on a phone, open the "Network" URL Vite pr
 | `npm run preview` | Serves the `dist/` build locally |
 | `npm test` | Runs the unit tests for presets and curve math |
 
+## Hosting on GitHub Pages
+
+Every push to `main` runs the tests, builds the app and deploys it to GitHub Pages. To turn this on once, make the repository public (a free GitHub plan requires it for Pages), then go to **Settings → Pages** and set **Source** to **GitHub Actions**. Re-run the workflow from the **Actions** tab, and the app will be live at `https://<your-username>.github.io/pixelroom/`.
+
+The site only serves the app's code. Photos are still processed on the device and never uploaded.
+
 ## Controls
 
 | Action | Mouse / keyboard | Touch |
