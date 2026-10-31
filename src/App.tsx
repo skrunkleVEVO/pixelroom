@@ -1,62 +1,15 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ComponentType, type ReactNode } from 'react';
 import { ExportDialog } from './components/ExportDialog';
-import {
-  ChevronIcon,
-  CompareIcon,
-  ExportIcon,
-  OpenIcon,
-  RedoIcon,
-  ResetIcon,
-  UndoIcon,
-} from './components/Icons';
-import { SECTIONS } from './components/panels';
+import { ChevronIcon, CompareIcon, OpenIcon, RedoIcon, UndoIcon } from './components/Icons';
+import { MobileTools, QuickExport } from './components/MobileTools';
+import { LEFT_SECTIONS, RIGHT_SECTIONS, type Section } from './components/panels';
 import { useMediaQuery } from './components/Slider';
 import { Viewer } from './components/Viewer';
-import { openFile } from './state/editor';
-import { actions, useStore } from './state/store';
+import { Filmstrip, Histogram, LibraryGrid, LibraryInfo, Navigator, ToolStrip, Toolbar } from './components/Workspace';
+import { importFiles, stepPhoto } from './state/editor';
+import { actions, getState, useStore, type Module } from './state/store';
 
-const COMPACT_QUERY = '(max-width: 899px) and (min-height: 501px)';
-const LONG_PRESS_MS = 350;
-
-/** Tap: toggle side by side. Long press: peek at the original while held. */
-function CompareButton() {
-  const compare = useStore((s) => s.compare);
-  const disabled = useStore((s) => !s.photo);
-  const timer = useRef<number | undefined>(undefined);
-  const longPressed = useRef(false);
-
-  const release = () => {
-    window.clearTimeout(timer.current);
-    actions.setPeek(false);
-  };
-
-  return (
-    <button
-      className={`icon-button labelled${compare === 'side' ? ' on' : ''}`}
-      disabled={disabled}
-      aria-pressed={compare === 'side'}
-      title="Tap for side by side. Hold to see the original. (Y, or hold \)"
-      onPointerDown={() => {
-        longPressed.current = false;
-        timer.current = window.setTimeout(() => {
-          longPressed.current = true;
-          actions.setPeek(true);
-        }, LONG_PRESS_MS);
-      }}
-      onPointerUp={release}
-      onPointerLeave={release}
-      onPointerCancel={release}
-      onContextMenu={(e) => e.preventDefault()}
-      onClick={() => {
-        if (!longPressed.current) actions.toggleCompare();
-        longPressed.current = false;
-      }}
-    >
-      <CompareIcon />
-      <span>Before / After</span>
-    </button>
-  );
-}
+const COMPACT_QUERY = '(max-width: 899px), (max-height: 500px)';
 
 function Toast() {
   const toast = useStore((s) => s.toast);
@@ -73,95 +26,139 @@ function Toast() {
   );
 }
 
-function DesktopPanels() {
-  const [open, setOpen] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(SECTIONS.map((s) => [s.id, !!s.defaultOpen])),
-  );
+function Panel({ title, defaultOpen, children }: { title: string; defaultOpen?: boolean; children: ReactNode }) {
+  const [open, setOpen] = useState(!!defaultOpen);
   return (
-    <aside className="side-panel" aria-label="Adjustments">
-      {SECTIONS.map(({ id, title, Panel }) => (
-        <section key={id} className={`accordion${open[id] ? ' open' : ''}`}>
-          <button
-            className="accordion-head"
-            aria-expanded={!!open[id]}
-            onClick={() => setOpen((o) => ({ ...o, [id]: !o[id] }))}
-          >
-            {title}
-            <ChevronIcon />
-          </button>
-          {open[id] && (
-            <div className="accordion-body">
-              <Panel />
-            </div>
-          )}
-        </section>
-      ))}
-    </aside>
+    <section className={`panel${open ? ' open' : ''}`}>
+      <button className="panel-head" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <span className="panel-title">{title}</span>
+        <ChevronIcon />
+      </button>
+      {open && <div className="panel-body">{children}</div>}
+    </section>
   );
 }
 
-function CompactPanels() {
-  const [active, setActive] = useState<string | null>('presets');
-  const section = SECTIONS.find((s) => s.id === active);
+function PanelStack({ sections }: { sections: Section[] }) {
   return (
-    <div className="bottom-tools">
-      {section && (
-        <div className="sheet" aria-label={section.title}>
-          <section.Panel />
-        </div>
-      )}
-      <nav className="tool-tabs" aria-label="Adjustment groups">
-        {SECTIONS.map(({ id, shortTitle, Icon }) => (
-          <button
-            key={id}
-            className={id === active ? 'active' : ''}
-            aria-pressed={id === active}
-            onClick={() => setActive((current) => (current === id ? null : id))}
-          >
-            <Icon />
-            <span>{shortTitle}</span>
-          </button>
-        ))}
-      </nav>
-    </div>
+    <>
+      {sections.map(({ id, title, Panel: Body, defaultOpen }: { id: string; title: string; Panel: ComponentType; defaultOpen?: boolean }) => (
+        <Panel key={id} title={title} defaultOpen={defaultOpen}>
+          <Body />
+        </Panel>
+      ))}
+    </>
   );
 }
+
+const MODULES: { id: Module; label: string }[] = [
+  { id: 'library', label: 'Library' },
+  { id: 'develop', label: 'Develop' },
+];
 
 export function App() {
   const compact = useMediaQuery(COMPACT_QUERY);
-  const photo = useStore((s) => s.photo);
-  const canUndo = useStore((s) => s.past.length > 0);
-  const canRedo = useStore((s) => s.future.length > 0);
+  const module = useStore((s) => s.module);
+  const hasPhoto = useStore((s) => s.activeId !== null);
+  const canUndo = useStore((s) => s.historyIndex > 0);
+  const canRedo = useStore((s) => s.historyIndex < s.history.length - 1);
+  const canPaste = useStore((s) => s.clipboard !== null);
+  const canPrevious = useStore((s) => s.catalog.findIndex((p) => p.id === s.activeId) > 0);
+  const hidePanels = useStore((s) => s.hidePanels);
+  const hideChrome = useStore((s) => s.hideChrome);
+  const lights = useStore((s) => s.lights);
   const [exporting, setExporting] = useState(false);
+  const [quickExport, setQuickExport] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const pickFile = useCallback(() => fileRef.current?.click(), []);
   const closeExport = useCallback(() => setExporting(false), []);
 
   const onFile = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const files = Array.from(e.target.files ?? []);
     e.target.value = '';
-    if (file) void openFile(file);
+    if (files.length) void importFiles(files);
   };
 
   useEffect(() => {
     const isTyping = (t: EventTarget | null) =>
-      t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement;
+      t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement;
     const onKeyDown = (e: KeyboardEvent) => {
       if (isTyping(e.target)) return;
       const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
-      if (mod && key === 'z') {
+      const photo = getState().activeId !== null;
+
+      if (mod) {
+        if (key === 'z') {
+          e.preventDefault();
+          if (e.shiftKey) actions.redo();
+          else actions.undo();
+        } else if (key === 'y') {
+          e.preventDefault();
+          actions.redo();
+        } else if (key === 'e' && e.shiftKey && photo) {
+          e.preventDefault();
+          setExporting(true);
+        } else if (key === 'i' && e.shiftKey) {
+          e.preventDefault();
+          pickFile();
+        } else if (key === 'c' && e.shiftKey && photo) {
+          e.preventDefault();
+          actions.copySettings();
+        } else if (key === 'v' && e.shiftKey && photo) {
+          e.preventDefault();
+          actions.pasteSettings();
+        }
+        return;
+      }
+
+      if (e.key === 'Tab') {
         e.preventDefault();
-        if (e.shiftKey) actions.redo();
-        else actions.undo();
-      } else if (mod && key === 'y') {
+        if (e.shiftKey) actions.toggleChrome();
+        else actions.togglePanels();
+      } else if (key === 'g') {
+        actions.setModule('library');
+      } else if (key === 'd' || key === 'e') {
+        actions.setModule('develop');
+      } else if (key === 'l') {
+        actions.cycleLights();
+      } else if (key === 'f') {
+        if (document.fullscreenElement) void document.exitFullscreen();
+        else void document.documentElement.requestFullscreen?.();
+      } else if (e.key === 'ArrowLeft') {
         e.preventDefault();
-        actions.redo();
-      } else if (!mod && key === 'y') {
+        stepPhoto(-1);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        stepPhoto(1);
+      } else if (!photo) {
+        return;
+      } else if (key === 'y') {
         actions.toggleCompare();
-      } else if (!mod && e.key === '\\') {
+      } else if (e.key === '\\') {
         actions.setPeek(true);
+      } else if (key === 'r' || key === 'w') {
+        // Read the tool first: changing module closes any open tool.
+        const tool = key === 'r' ? 'crop' : 'whiteBalance';
+        const next = getState().tool === tool ? 'none' : tool;
+        actions.setModule('develop');
+        actions.setTool(next);
+      } else if (key === 'j') {
+        actions.toggleClipping();
+      } else if (key === 'z') {
+        const { view } = getState();
+        actions.setView({ ...view, zoom: view.zoom === 'fit' ? 1 : 'fit' });
+      } else if (key === 'p') {
+        actions.setFlag('pick');
+      } else if (key === 'x') {
+        actions.setFlag('reject');
+      } else if (key === 'u') {
+        actions.setFlag(null);
+      } else if (/^[0-5]$/.test(key)) {
+        actions.setRating(Number(key));
+      } else if (e.key === 'Escape' && getState().tool !== 'none') {
+        actions.setTool('none');
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
@@ -173,48 +170,131 @@ export function App() {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, []);
+  }, [pickFile]);
+
+  const appClass = ['app', compact ? 'compact' : '', hidePanels ? 'hide-panels' : '', hideChrome ? 'hide-chrome' : '', `lights-${lights}`]
+    .filter(Boolean)
+    .join(' ');
+  const library = module === 'library' && !compact;
 
   return (
-    <div className={`app${compact ? ' compact' : ''}`}>
+    <div className={appClass}>
       <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true">P</span>
-          <span className="brand-name">PixelRoom</span>
-        </div>
-        {photo && (
-          <div className="photo-info">
-            {photo.name} · {photo.width} × {photo.height}
+        <div className="brand">PixelRoom</div>
+        {compact ? (
+          <div className="topbar-actions">
+            <button className="icon-button" aria-label="Import photos" title="Import photos" onClick={pickFile}>
+              <OpenIcon />
+            </button>
+            <button className="icon-button" aria-label="Undo" disabled={!canUndo} onClick={actions.undo}>
+              <UndoIcon />
+            </button>
+            <button className="icon-button" aria-label="Redo" disabled={!canRedo} onClick={actions.redo}>
+              <RedoIcon />
+            </button>
+            <button
+              className="icon-button"
+              aria-label="Hold to see the original"
+              disabled={!hasPhoto}
+              onPointerDown={() => actions.setPeek(true)}
+              onPointerUp={() => actions.setPeek(false)}
+              onPointerLeave={() => actions.setPeek(false)}
+              onPointerCancel={() => actions.setPeek(false)}
+              onContextMenu={(e) => e.preventDefault()}
+            >
+              <CompareIcon />
+            </button>
+            <button className="export-pill" disabled={!hasPhoto} onClick={() => setQuickExport(true)}>
+              Export
+            </button>
           </div>
+        ) : (
+          <nav className="modules" aria-label="Modules">
+            {MODULES.map((m, i) => (
+              <span key={m.id}>
+                {i > 0 && <span className="module-sep">|</span>}
+                <button className={module === m.id ? 'on' : ''} aria-current={module === m.id} onClick={() => actions.setModule(m.id)}>
+                  {m.label}
+                </button>
+              </span>
+            ))}
+          </nav>
         )}
-        <div className="topbar-actions">
-          <button className="icon-button" aria-label="Open photo" title="Open photo" onClick={pickFile}>
-            <OpenIcon />
-          </button>
-          <button className="icon-button" aria-label="Undo" title="Undo (Ctrl+Z)" disabled={!canUndo} onClick={actions.undo}>
-            <UndoIcon />
-          </button>
-          <button className="icon-button" aria-label="Redo" title="Redo (Ctrl+Shift+Z)" disabled={!canRedo} onClick={actions.redo}>
-            <RedoIcon />
-          </button>
-          <button className="icon-button" aria-label="Reset all adjustments" title="Reset all" disabled={!photo} onClick={actions.reset}>
-            <ResetIcon />
-          </button>
-          <CompareButton />
-          <button className="button primary export-button" disabled={!photo} onClick={() => setExporting(true)}>
-            <ExportIcon />
-            <span>Export</span>
-          </button>
-        </div>
       </header>
 
       <main className="workspace">
-        <Viewer onOpenClick={pickFile} />
-        {compact ? <CompactPanels /> : <DesktopPanels />}
+        {!compact && (
+          <aside className="side left" aria-label="Photo navigation">
+            <div className="side-scroll">
+              <Navigator />
+              {!library && <PanelStack sections={LEFT_SECTIONS} />}
+            </div>
+            <div className="side-foot">
+              <button className="flat-button grow" onClick={pickFile} title="Import (Ctrl+Shift+I)">
+                Import...
+              </button>
+              <button className="flat-button grow" disabled={!hasPhoto} onClick={() => setExporting(true)} title="Export (Ctrl+Shift+E)">
+                Export...
+              </button>
+            </div>
+          </aside>
+        )}
+
+        <div className="center">
+          {library && <LibraryGrid />}
+          {/* Stays mounted in Library so the GL context and the open photo survive. */}
+          <div className={`viewer-wrap${library ? ' hidden' : ''}`}>
+            <Viewer onOpenClick={pickFile} />
+          </div>
+          {!compact && <Toolbar />}
+        </div>
+
+        {compact && hasPhoto && <MobileTools />}
+        {!compact && (
+          <aside className="side right" aria-label="Adjustments">
+            <div className="side-scroll">
+              <Histogram />
+              {library && <Panel title="Metadata" defaultOpen><LibraryInfo /></Panel>}
+              {!library && (
+                <>
+                  <ToolStrip />
+                  <PanelStack sections={RIGHT_SECTIONS} />
+                </>
+              )}
+            </div>
+            {!library && (
+              <div className="side-foot">
+                <button className="flat-button grow" disabled={!hasPhoto} onClick={actions.copySettings} title="Copy settings (Ctrl+Shift+C)">
+                  Copy...
+                </button>
+                <button className="flat-button grow" disabled={!canPaste} onClick={actions.pasteSettings} title="Paste settings (Ctrl+Shift+V)">
+                  Paste
+                </button>
+                <button className="flat-button grow" disabled={!canPrevious} onClick={actions.pastePrevious} title="Apply the previous photo's settings">
+                  Previous
+                </button>
+                <button className="flat-button grow" disabled={!hasPhoto} onClick={actions.reset} title="Reset all settings">
+                  Reset
+                </button>
+              </div>
+            )}
+          </aside>
+        )}
       </main>
 
-      <input ref={fileRef} type="file" accept="image/*" hidden onChange={onFile} />
+      {!compact && <Filmstrip />}
+
+      <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={onFile} />
       {exporting && <ExportDialog onClose={closeExport} />}
+      {quickExport && (
+        <QuickExport
+          onClose={() => setQuickExport(false)}
+          onMore={() => {
+            setQuickExport(false);
+            setExporting(true);
+          }}
+        />
+      )}
       <Toast />
     </div>
   );

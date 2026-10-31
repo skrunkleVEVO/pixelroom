@@ -125,3 +125,69 @@ export const EffectsIcon = () => (
     <path d="M19 16v4M17 18h4" />
   </Icon>
 );
+export const CropIcon = () => (
+  <Icon size={18}>
+    <path d="M7 2v15h15" />
+    <path d="M2 7h15v15" />
+  </Icon>
+);
+export const EyedropperIcon = () => (
+  <Icon size={17}>
+    <path d="m14 7 3 3" />
+    <path d="M12.500 8.500 4 17v3h3l8.500-8.500" />
+    <path d="M13 6l1.500-1.500a2.800 2.800 0 0 1 4 0l1 1a2.800 2.800 0 0 1 0 4L18 11z" />
+  </Icon>
+);
+export const RotateLeftIcon = () => (
+  <Icon size={17}>
+    <path d="M4 4v5h5" />
+    <path d="M4.500 9A8 8 0 1 1 4 14" />
+  </Icon>
+);
+export const RotateRightIcon = () => (
+  <Icon size={17}>
+    <path d="M20 4v5h-5" />
+    <path d="M19.500 9A8 8 0 1 0 20 14" />
+  </Icon>
+);
+export const FlipIcon = () => (
+  <Icon size={17}>
+    <path d="M12 3v18" strokeDasharray="2 3" />
+    <path d="M8 7 3 17h5z" />
+    <path d="m16 7 5 10h-5z" />
+  </Icon>
+);
+export const GridIcon = () => (
+  <Icon size={17}>
+    <rect x="3" y="3" width="5" height="5" />
+    <rect x="10" y="3" width="5" height="5" />
+    <rect x="17" y="3" width="4" height="5" />
+    <rect x="3" y="10" width="5" height="5" />
+    <rect x="10" y="10" width="5" height="5" />
+    <rect x="17" y="10" width="4" height="5" />
+    <rect x="3" y="17" width="5" height="4" />
+    <rect x="10" y="17" width="5" height="4" />
+    <rect x="17" y="17" width="4" height="4" />
+  </Icon>
+);
+export const LoupeIcon = () => (
+  <Icon size={17}>
+    <rect x="4" y="5" width="16" height="14" />
+  </Icon>
+);
+export const SplitIcon = () => (
+  <Icon size={17}>
+    <rect x="3" y="5" width="8" height="14" />
+    <rect x="13" y="5" width="8" height="14" />
+  </Icon>
+);
+export const FlagIcon = () => (
+  <Icon size={15}>
+    <path d="M6 21V4h12l-3 4.500L18 13H6" />
+  </Icon>
+);
+export const StarIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <path d="m12 3 2.700 5.900 6.300.8-4.600 4.400 1.200 6.400L12 17.300l-5.600 3.200 1.200-6.400L3 9.700l6.300-.8z" />
+  </svg>
+);

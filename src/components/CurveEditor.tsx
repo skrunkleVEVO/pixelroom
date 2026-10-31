@@ -32,6 +32,16 @@ export function CurveEditor() {
 
   const tab = TABS.find((t) => t.id === channel) ?? TABS[0];
   const path = useMemo(() => curvePath(points), [points]);
+  const analysis = useStore((s) => s.analysis);
+  const backdrop = useMemo(() => {
+    if (!analysis) return '';
+    const bins = channel === 'rgb' ? analysis.luma : analysis[channel];
+    let peak = 1;
+    for (let i = 1; i < 255; i++) peak = Math.max(peak, bins[i]);
+    let d = `M0 ${SIZE}`;
+    for (let i = 0; i < 256; i++) d += `L${i} ${SIZE - Math.min(1, Math.sqrt(bins[i] / peak)) * SIZE * 0.9}`;
+    return `${d}L${SIZE} ${SIZE}Z`;
+  }, [analysis, channel]);
 
   const toCurve = (e: PointerEvent<SVGSVGElement>): CurvePoint => {
     const rect = svgRef.current?.getBoundingClientRect();
@@ -44,7 +54,7 @@ export function CurveEditor() {
 
   const removePoint = (index: number) => {
     if (points.length <= 2) return;
-    actions.change((p) => {
+    actions.change('Tone Curve', (p) => {
       p.curve[channel].splice(index, 1);
     });
     setReadout(null);
@@ -109,7 +119,7 @@ export function CurveEditor() {
   const onPointerUp = (e: PointerEvent<SVGSVGElement>) => {
     if (drag.current?.id !== e.pointerId) return;
     drag.current = null;
-    actions.commit();
+    actions.commit('Tone Curve');
   };
 
   const isChanged = (ch: CurveChannel, list: CurvePoint[]) =>
@@ -147,6 +157,7 @@ export function CurveEditor() {
         onPointerCancel={onPointerUp}
       >
         <rect x="0" y="0" width={SIZE} height={SIZE} className="curve-bg" />
+        {backdrop && <path d={backdrop} className="curve-hist" />}
         {[0.25, 0.5, 0.75].map((f) => (
           <g key={f} className="curve-grid">
             <line x1={f * SIZE} y1="0" x2={f * SIZE} y2={SIZE} />
@@ -177,7 +188,7 @@ export function CurveEditor() {
           className="text-button"
           disabled={!isChanged(channel, points)}
           onClick={() =>
-            actions.change((p) => {
+            actions.change('Reset Tone Curve', (p) => {
               p.curve[channel] = identityCurve();
             })
           }

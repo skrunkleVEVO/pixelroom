@@ -8,6 +8,7 @@ import {
   type EditParams,
   type Range,
 } from '../engine/params';
+import type { Geometry } from '../engine/geometry';
 
 export interface Preset {
   id: string;
@@ -18,8 +19,10 @@ export interface Preset {
 
 export const NEUTRAL_ID = 'builtin-neutral';
 export const MORIOH_ID = 'builtin-morioh';
-/** Preset applied whenever a new photo is opened. */
-export const DEFAULT_PRESET_ID = MORIOH_ID;
+export const CYBERPUNK_ID = 'builtin-cyberpunk-edgerunners';
+export const TOKYO_GHOUL_ID = 'builtin-tokyo-ghoul';
+/** Photos open unedited. A look is something you choose, never something done to you. */
+export const DEFAULT_PRESET_ID = NEUTRAL_ID;
 
 export function moriohParams(): EditParams {
   const base = defaultParams();
@@ -61,6 +64,7 @@ export function moriohParams(): EditParams {
       balance: 15,
     },
     effects: {
+      ...base.effects,
       vignetteAmount: -12,
       vignetteMidpoint: 50,
       vignetteFeather: 60,
@@ -70,11 +74,88 @@ export function moriohParams(): EditParams {
   };
 }
 
+export function cyberpunkParams(): EditParams {
+  const base = defaultParams();
+  return {
+    ...base,
+    light: { exposure: 0.4, contrast: 0, highlights: 30, shadows: 0, whites: 34, blacks: 0 },
+    hsl: {
+      ...base.hsl,
+      blue: { hue: 15, sat: -25, lum: 5 },
+      aqua: { hue: -20, sat: 40, lum: -12 },
+    },
+    grading: { ...base.grading, shadows: { hue: 285, sat: 35, lum: -10 } },
+  };
+}
+
+export function tokyoGhoulParams(): EditParams {
+  const base = defaultParams();
+  const purple = { hue: 20, sat: 8, lum: -8 };
+  return {
+    ...base,
+    light: { exposure: -0.18, contrast: 24, highlights: -38, shadows: -30, whites: 12, blacks: -34 },
+    hsl: {
+      ...base.hsl,
+      red: { hue: -6, sat: -12, lum: 7 },
+      aqua: { hue: -22, sat: -22, lum: -20 },
+      // The source gives one "Purple/Magenta" setting, so both channels share it.
+      purple: { ...purple },
+      magenta: { ...purple },
+    },
+    grading: { ...base.grading, highlights: { hue: 346, sat: 10, lum: 2 } },
+  };
+}
+
 export function builtInPresets(): Preset[] {
   return [
     { id: MORIOH_ID, name: 'Morioh', builtIn: true, params: moriohParams() },
+    { id: CYBERPUNK_ID, name: 'Cyberpunk: Edgerunners', builtIn: true, params: cyberpunkParams() },
+    { id: TOKYO_GHOUL_ID, name: 'Tokyo Ghoul', builtIn: true, params: tokyoGhoulParams() },
     { id: NEUTRAL_ID, name: 'Neutral', builtIn: true, params: defaultParams() },
   ];
+}
+
+/**
+ * A preset at partial strength: every setting moves that fraction of the way from
+ * neutral. Grading hues stay put because their saturation carries the strength, and
+ * curves blend toward the diagonal. The crop always comes from `geometry`.
+ */
+export function blendPreset(preset: EditParams, strength: number, geometry: Geometry): EditParams {
+  const t = Math.min(1, Math.max(0, strength));
+  const base = defaultParams();
+  const round = (v: number, places: number) => Number(v.toFixed(places));
+  const mix = (a: number, b: number, places = 0) => round(a + (b - a) * t, places);
+
+  const out = defaultParams();
+  out.mono = preset.mono;
+  out.geometry = { ...geometry };
+  const scalars = (group: 'light' | 'color' | 'presence' | 'detail' | 'effects') => {
+    const from = base[group] as unknown as Record<string, number>;
+    const to = preset[group] as unknown as Record<string, number>;
+    const target = out[group] as unknown as Record<string, number>;
+    for (const key of Object.keys(target)) {
+      target[key] = mix(from[key], to[key], key === 'exposure' || key === 'sharpenRadius' ? 2 : 0);
+    }
+  };
+  scalars('light');
+  scalars('color');
+  scalars('presence');
+  scalars('detail');
+  scalars('effects');
+  for (const ch of CURVE_CHANNELS) {
+    out.curve[ch] = preset.curve[ch].map(([x, y]) => [x, round(x + (y - x) * t, 2)]);
+  }
+  for (const ch of HSL_CHANNELS) {
+    const v = preset.hsl[ch];
+    out.hsl[ch] = { hue: mix(0, v.hue), sat: mix(0, v.sat), lum: mix(0, v.lum) };
+  }
+  for (const zone of GRADE_ZONES) {
+    const v = preset.grading[zone];
+    out.grading[zone] = { hue: v.hue, sat: mix(0, v.sat), lum: mix(0, v.lum) };
+  }
+  out.grading.blending = mix(base.grading.blending, preset.grading.blending);
+  out.grading.balance = mix(base.grading.balance, preset.grading.balance);
+  return out;
 }
 
 // ---------------------------------------------------------------- JSON format
@@ -126,7 +207,7 @@ export function sanitizeParams(input: unknown): EditParams {
   const src = asObject(input);
   const out = defaultParams();
 
-  const scalars = (group: 'light' | 'color' | 'presence' | 'effects') => {
+  const scalars = (group: 'light' | 'color' | 'presence' | 'effects' | 'detail') => {
     const from = asObject(src[group]);
     const to = out[group] as unknown as Record<string, number>;
     const ranges = RANGES[group] as unknown as Record<string, Range>;
@@ -136,6 +217,18 @@ export function sanitizeParams(input: unknown): EditParams {
   scalars('color');
   scalars('presence');
   scalars('effects');
+  scalars('detail');
+  out.mono = src.mono === true;
+
+  const g = asObject(src.geometry);
+  const unit = (v: unknown, fallback: number) => num(v, fallback, [0, 1]);
+  out.geometry.x = unit(g.x, 0);
+  out.geometry.y = unit(g.y, 0);
+  out.geometry.w = Math.max(0.01, Math.min(1 - out.geometry.x, unit(g.w, 1)));
+  out.geometry.h = Math.max(0.01, Math.min(1 - out.geometry.y, unit(g.h, 1)));
+  out.geometry.angle = num(g.angle, 0, RANGES.angle);
+  out.geometry.rot90 = Math.round(num(g.rot90, 0, [0, 3]));
+  out.geometry.flipH = g.flipH === true;
 
   const curve = asObject(src.curve);
   for (const ch of CURVE_CHANNELS) out.curve[ch] = sanitizeCurve(curve[ch], out.curve[ch]);
@@ -175,7 +268,7 @@ export function presetFromJson(text: string): { name: string; params: EditParams
   }
   const root = asObject(data);
   const params = asObject(root.params);
-  const known = ['light', 'color', 'presence', 'curve', 'hsl', 'grading', 'effects'];
+  const known = ['light', 'color', 'presence', 'curve', 'hsl', 'grading', 'effects', 'detail'];
   if (!known.some((key) => key in params)) {
     throw new Error('That file does not contain PixelRoom preset settings.');
   }

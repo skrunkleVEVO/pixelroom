@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { defaultParams, type EditParams, type Range } from '../engine/params';
-import { actions, useStore } from '../state/store';
+import { actions, getState, useStore } from '../state/store';
 
 interface SliderProps {
   label: string;
@@ -10,6 +10,8 @@ interface SliderProps {
   resetValue: number;
   gradient?: string;
   format?: (value: number) => string;
+  /** Narrow layout, stacked under a colour wheel. */
+  compact?: boolean;
   onChange: (value: number) => void;
   onCommit: () => void;
 }
@@ -35,6 +37,7 @@ export function Slider({
   resetValue,
   gradient,
   format = signed,
+  compact = false,
   onChange,
   onCommit,
 }: SliderProps) {
@@ -139,31 +142,10 @@ export function Slider({
   const fillWidth = Math.abs(position - anchor);
 
   return (
-    <div className="slider">
-      <div className="slider-head">
-        <span className="slider-label" onDoubleClick={reset} title="Double-click to reset">
-          {label}
-        </span>
-        <input
-          className={`slider-value${value !== resetValue ? ' changed' : ''}`}
-          inputMode="decimal"
-          aria-label={`${label} value`}
-          value={draft ?? format(value)}
-          onFocus={(e) => {
-            setDraft(format(value));
-            e.currentTarget.select();
-          }}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={commitDraft}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') e.currentTarget.blur();
-            if (e.key === 'Escape') {
-              setDraft(null);
-              requestAnimationFrame(() => (e.target as HTMLInputElement).blur());
-            }
-          }}
-        />
-      </div>
+    <div className={`slider${compact ? ' compact' : ''}`}>
+      <span className="slider-label" onDoubleClick={reset} title="Double-click to reset">
+        {label}
+      </span>
       <div
         className="slider-hit"
         role="slider"
@@ -191,6 +173,25 @@ export function Slider({
           <div className="slider-thumb" style={{ left: `${position * 100}%` }} />
         </div>
       </div>
+      <input
+          className={`slider-value${value !== resetValue ? ' changed' : ''}`}
+          inputMode="decimal"
+          aria-label={`${label} value`}
+          value={draft ?? format(value)}
+          onFocus={(e) => {
+            setDraft(format(value));
+            e.currentTarget.select();
+          }}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commitDraft}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur();
+            if (e.key === 'Escape') {
+              setDraft(null);
+              requestAnimationFrame(() => (e.target as HTMLInputElement).blur());
+            }
+          }}
+      />
     </div>
   );
 }
@@ -203,12 +204,15 @@ interface ParamSliderProps {
   step?: number;
   gradient?: string;
   format?: (value: number) => string;
+  compact?: boolean;
+  /** Name in the History panel, when the label alone is ambiguous. */
+  historyLabel?: string;
 }
 
 const NEUTRAL = defaultParams();
 
 /** A slider bound to one parameter; it subscribes to that value alone. */
-export const ParamSlider = memo(function ParamSlider({ get, set, ...rest }: ParamSliderProps) {
+export const ParamSlider = memo(function ParamSlider({ get, set, historyLabel, ...rest }: ParamSliderProps) {
   const value = useStore((s) => get(s.params));
   return (
     <Slider
@@ -216,7 +220,10 @@ export const ParamSlider = memo(function ParamSlider({ get, set, ...rest }: Para
       value={value}
       resetValue={get(NEUTRAL)}
       onChange={(v) => actions.update((draft) => set(draft, v))}
-      onCommit={actions.commit}
+      onCommit={() => {
+        const shown = (rest.format ?? signed)(get(getState().params));
+        actions.commit(`${historyLabel ?? rest.label} ${shown}`);
+      }}
     />
   );
 });

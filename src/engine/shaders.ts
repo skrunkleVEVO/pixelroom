@@ -1,8 +1,12 @@
 // All GLSL lives here. Pipeline, in order:
-//   sRGB decode -> white balance -> dehaze -> exposure -> sRGB encode ->
+//   noise reduction -> sRGB decode -> white balance -> dehaze -> exposure -> sRGB encode ->
 //   tone (highlights/shadows/whites/blacks) -> local detail (texture/clarity/
 //   sharpen) -> contrast -> tone curve LUT -> HSL mixer -> vibrance/saturation ->
-//   color grading -> vignette -> grain -> dither.
+//   black & white -> color grading -> vignette -> grain -> dither.
+//
+// Coordinates: vUv covers the viewport. uTileRect maps it to output uv (the cropped
+// picture). uOutToSrc maps output uv to source uv (the whole original). uSourceRect
+// maps source uv to whichever texture currently holds those pixels.
 //
 // Local-contrast tools compare the *source* pixel with blurred copies of the
 // *source*. The blurs are built once per photo at fixed sizes, so slider drags
@@ -42,10 +46,16 @@ uniform sampler2D uBlurFine;    // source blurred ~0.3% of the long edge
 uniform sampler2D uBlurWide;    // source blurred ~2% of the long edge
 uniform sampler2D uCurveLut;    // baked tone curves, 1024 x 1
 
-uniform vec4 uTileRect;         // xy offset, zw scale: vUv -> whole-image uv
-uniform vec4 uSourceRect;       // xy offset, zw scale: whole-image uv -> uSource uv
-uniform vec2 uImageSize;        // whole image size in pixels
-uniform vec2 uSharpenStep;      // sharpen kernel radius, whole-image uv
+uniform vec4 uTileRect;         // xy offset, zw scale: vUv -> output uv
+uniform vec3 uOutToSrcX;        // output uv -> source uv, first row
+uniform vec3 uOutToSrcY;        // output uv -> source uv, second row
+uniform vec4 uSourceRect;       // xy offset, zw scale: source uv -> uSource uv
+uniform vec2 uImageSize;        // output size in pixels
+uniform vec2 uTexelStep;        // one source pixel in source uv, or one texel if coarser
+uniform bool uHighQuality;      // texels do not align with output pixels: use a cubic filter
+uniform bool uCheckBounds;      // straightened: pixels may fall outside the photo
+uniform bool uShowClipping;
+uniform float uDither;
 
 uniform vec3  uWbGain;
 uniform float uExposureGain;
@@ -59,6 +69,12 @@ uniform float uBlacks;
 uniform float uTexture;
 uniform float uClarity;
 uniform float uSharpen;
+uniform float uSharpenRadius;
+uniform float uSharpenDetail;
+uniform float uSharpenMasking;
+uniform float uNoiseLuma;
+uniform float uNoiseColor;
+uniform bool  uMono;
 uniform bool  uCurveOn;
 uniform bool  uHslOn;
 uniform vec3  uHsl[8];          // hue shift (degrees), sat factor, lum factor
@@ -73,6 +89,8 @@ uniform float uVigAmount;
 uniform float uVigMid;
 uniform float uVigFeather;
 uniform float uGrain;
+uniform float uGrainSize;
+uniform float uGrainRoughness;
 uniform float uDitherSeed;
 
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
@@ -142,12 +160,104 @@ float valueNoise(vec2 p) {
              mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
 }
 
+// Catmull-Rom in 9 bilinear fetches: stays sharp when magnifying or rotating, and
+// reproduces texel values exactly when it lands on texel centres.
+vec4 sampleCubic(sampler2D tex, vec2 uv) {
+  vec2 size = vec2(textureSize(tex, 0));
+  vec2 pos = uv * size;
+  vec2 base = floor(pos - 0.5) + 0.5;
+  vec2 f = pos - base;
+  vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+  vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+  vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+  vec2 w3 = f * f * (-0.5 + 0.5 * f);
+  vec2 w12 = w1 + w2;
+  vec2 t0 = (base - 1.0) / size;
+  vec2 t3 = (base + 2.0) / size;
+  vec2 t12 = (base + w2 / w12) / size;
+  vec4 c = texture(tex, vec2(t0.x, t0.y)) * w0.x * w0.y
+         + texture(tex, vec2(t12.x, t0.y)) * w12.x * w0.y
+         + texture(tex, vec2(t3.x, t0.y)) * w3.x * w0.y
+         + texture(tex, vec2(t0.x, t12.y)) * w0.x * w12.y
+         + texture(tex, vec2(t12.x, t12.y)) * w12.x * w12.y
+         + texture(tex, vec2(t3.x, t12.y)) * w3.x * w12.y
+         + texture(tex, vec2(t0.x, t3.y)) * w0.x * w3.y
+         + texture(tex, vec2(t12.x, t3.y)) * w12.x * w3.y
+         + texture(tex, vec2(t3.x, t3.y)) * w3.x * w3.y;
+  return clamp(c, 0.0, 1.0);
+}
+
+// Cubic B-spline in 4 bilinear fetches. The blur textures are small, and plain bilinear
+// upscaling of them leaves a visible grid in anything derived from them.
+vec4 sampleSmooth(sampler2D tex, vec2 uv) {
+  vec2 size = vec2(textureSize(tex, 0));
+  vec2 pos = uv * size - 0.5;
+  vec2 i = floor(pos);
+  vec2 f = pos - i;
+  vec2 f2 = f * f;
+  vec2 f3 = f2 * f;
+  vec2 w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0;
+  vec2 w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+  vec2 w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0;
+  vec2 w3 = f3 / 6.0;
+  vec2 g0 = w0 + w1;
+  vec2 g1 = w2 + w3;
+  vec2 h0 = (i - 0.5 + w1 / g0) / size;
+  vec2 h1 = (i + 1.5 + w3 / g1) / size;
+  return (texture(tex, vec2(h0.x, h0.y)) * g0.x + texture(tex, vec2(h1.x, h0.y)) * g1.x) * g0.y
+       + (texture(tex, vec2(h0.x, h1.y)) * g0.x + texture(tex, vec2(h1.x, h1.y)) * g1.x) * g1.y;
+}
+
+vec3 tap(vec2 srcUv) {
+  return texture(uSource, uSourceRect.xy + srcUv * uSourceRect.zw).rgb;
+}
+
+// Edge-preserving smoothing: nearby pixels count only if their tone is close.
+vec3 reduceLumaNoise(vec3 center, vec2 uv) {
+  float sigma = 0.012 + 0.1 * uNoiseLuma;
+  float centerLuma = dot(center, LUMA);
+  vec3 sum = center;
+  float total = 1.0;
+  for (int ring = 1; ring <= 2; ring++) {
+    float radius = float(ring) * (1.0 + uNoiseLuma);
+    for (int i = 0; i < 8; i++) {
+      float a = float(i) * 0.78539816 + float(ring) * 0.39269908;
+      vec3 s = tap(uv + vec2(cos(a), sin(a)) * radius * uTexelStep);
+      float d = (dot(s, LUMA) - centerLuma) / sigma;
+      float weight = exp(-d * d) * (ring == 1 ? 1.0 : 0.6);
+      sum += s * weight;
+      total += weight;
+    }
+  }
+  vec3 smoothed = sum / total;
+  // Replaces only tone, so the colour of the pixel survives.
+  return center + (dot(smoothed, LUMA) - centerLuma) * min(uNoiseLuma * 1.4, 1.0);
+}
+
 void main() {
-  vec2 uv = uTileRect.xy + vUv * uTileRect.zw;
-  vec4 texel = texture(uSource, uSourceRect.xy + uv * uSourceRect.zw);
+  vec2 outUv = uTileRect.xy + vUv * uTileRect.zw;
+  vec2 uv = vec2(dot(uOutToSrcX, vec3(outUv, 1.0)), dot(uOutToSrcY, vec3(outUv, 1.0)));
+  if (uCheckBounds && (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)) {
+    outColor = vec4(0.0);
+    return;
+  }
+  vec2 sourceUv = uSourceRect.xy + uv * uSourceRect.zw;
+  vec4 texel = uHighQuality ? sampleCubic(uSource, sourceUv) : texture(uSource, sourceUv);
   vec3 srcGamma = texel.rgb;
-  vec3 fine = texture(uBlurFine, uv).rgb;
-  vec3 wide = texture(uBlurWide, uv).rgb;
+  vec3 fine = sampleSmooth(uBlurFine, uv).rgb;
+  vec3 wide = sampleSmooth(uBlurWide, uv).rgb;
+
+  // --- Noise reduction runs first, so later stages do not amplify what it removes.
+  if (uNoiseColor > 0.0) {
+    // Takes colour from the blur except across a real edge in tone.
+    float edge = abs(dot(srcGamma, LUMA) - dot(fine, LUMA));
+    float keep = smoothstep(0.02, 0.14, edge);
+    vec3 chroma = fine - dot(fine, LUMA);
+    vec3 smoothed = dot(srcGamma, LUMA) + chroma;
+    srcGamma = mix(srcGamma, clamp(smoothed, 0.0, 1.0), uNoiseColor * (1.0 - keep));
+  }
+  if (uNoiseLuma > 0.0) srcGamma = reduceLumaNoise(srcGamma, uv);
+
   float srcLuma = dot(srcGamma, LUMA);
   float wideLuma = dot(wide, LUMA);
 
@@ -187,19 +297,23 @@ void main() {
   float texBand = srcLuma - dot(fine, LUMA);
   toned += uTexture * 1.1 * (texBand / (1.0 + 6.0 * abs(texBand)));
   if (uSharpen > 0.0) {
-    vec2 s = uSharpenStep;
-    vec2 m = uSourceRect.zw;
-    vec2 o = uSourceRect.xy;
-    vec3 n = texture(uSource, o + (uv + vec2( s.x, 0.0)) * m).rgb
-           + texture(uSource, o + (uv + vec2(-s.x, 0.0)) * m).rgb
-           + texture(uSource, o + (uv + vec2(0.0,  s.y)) * m).rgb
-           + texture(uSource, o + (uv + vec2(0.0, -s.y)) * m).rgb;
-    vec3 d = texture(uSource, o + (uv + s) * m).rgb
-           + texture(uSource, o + (uv - s) * m).rgb
-           + texture(uSource, o + (uv + vec2(s.x, -s.y)) * m).rgb
-           + texture(uSource, o + (uv + vec2(-s.x, s.y)) * m).rgb;
+    // Unsharp mask on luma with a radius in source pixels, so 1:1 preview matches export.
+    vec2 s = uTexelStep * uSharpenRadius;
+    vec3 n = tap(uv + vec2(s.x, 0.0)) + tap(uv - vec2(s.x, 0.0))
+           + tap(uv + vec2(0.0, s.y)) + tap(uv - vec2(0.0, s.y));
+    vec3 d = tap(uv + s) + tap(uv - s) + tap(uv + vec2(s.x, -s.y)) + tap(uv + vec2(-s.x, s.y));
     float edge = srcLuma - dot((srcGamma * 4.0 + n * 2.0 + d) / 16.0, LUMA);
-    toned += uSharpen * 1.6 * (edge / (1.0 + 10.0 * abs(edge)));
+    // Detail: low values suppress halos by limiting strong edges; high values let them through.
+    float limit = mix(16.0, 1.5, uSharpenDetail);
+    float amount = uSharpen * 1.6 * (edge / (1.0 + limit * abs(edge)));
+    // Masking: protects smooth areas (skies, skin) by sharpening only real edges.
+    if (uSharpenMasking > 0.0) {
+      float grad = length(vec2(
+        dot(tap(uv + vec2(s.x, 0.0)) - tap(uv - vec2(s.x, 0.0)), LUMA),
+        dot(tap(uv + vec2(0.0, s.y)) - tap(uv - vec2(0.0, s.y)), LUMA)));
+      amount *= smoothstep(0.0, uSharpenMasking * 0.22 + 1e-4, grad);
+    }
+    toned += amount;
   }
 
   // Half additive, half ratio: keeps colour in lifted shadows without hue shifts
@@ -245,6 +359,7 @@ void main() {
   }
   if (uSaturation != 0.0) c = mix(vec3(dot(c, LUMA)), c, 1.0 + uSaturation);
   c = clamp(c, 0.0, 1.0);
+  if (uMono) c = vec3(dot(c, LUMA));
 
   // --- Colour grading: three overlapping luminance zones.
   if (uGradeOn) {
@@ -258,7 +373,7 @@ void main() {
 
   // --- Vignette: elliptical, follows the frame; radius 1 reaches the corners.
   if (uVigAmount != 0.0) {
-    float d = length((uv - 0.5) * 2.0) / 1.41421356;
+    float d = length((outUv - 0.5) * 2.0) / 1.41421356;
     float inner = uVigMid * (1.0 - uVigFeather);
     float outer = uVigMid + (1.05 - uVigMid) * uVigFeather + 0.001;
     float v = smoothstep(inner, outer, d);
@@ -267,15 +382,21 @@ void main() {
 
   // --- Grain: anchored to image coordinates, so export matches preview.
   if (uGrain > 0.0) {
-    vec2 p = uv * vec2(uImageSize.x / max(uImageSize.x, uImageSize.y),
-                       uImageSize.y / max(uImageSize.x, uImageSize.y)) * 1400.0;
-    float g = valueNoise(p) * 0.65 + valueNoise(p * 2.13 + 17.0) * 0.35 - 0.5;
+    vec2 p = outUv * vec2(uImageSize.x / max(uImageSize.x, uImageSize.y),
+                          uImageSize.y / max(uImageSize.x, uImageSize.y)) * (2400.0 / (1.0 + 3.0 * uGrainSize));
+    float rough = 0.15 + 0.5 * uGrainRoughness;
+    float g = valueNoise(p) * (1.0 - rough) + valueNoise(p * 2.13 + 17.0) * rough - 0.5;
     float l = clamp(dot(c, LUMA), 0.0, 1.0);
     c += g * uGrain * 0.42 * (0.35 + 0.65 * (1.0 - abs(2.0 * l - 1.0)));
   }
 
-  // Sub-LSB dither hides banding from 8-bit output without changing exact values.
   c = clamp(c, 0.0, 1.0);
-  c += (hash(gl_FragCoord.xy + uDitherSeed) - 0.5) * (0.98 / 255.0);
+  if (uShowClipping) {
+    if (max(c.r, max(c.g, c.b)) > 254.5 / 255.0) c = vec3(1.0, 0.1, 0.1);
+    else if (max(c.r, max(c.g, c.b)) < 0.5 / 255.0) c = vec3(0.1, 0.35, 1.0);
+  }
+  // Sub-LSB dither hides banding from 8-bit output. An unedited photo skips it, so its
+  // pixels come out bit-exact.
+  c += (hash(gl_FragCoord.xy + uDitherSeed) - 0.5) * uDither;
   outColor = vec4(c, texel.a);
 }`;

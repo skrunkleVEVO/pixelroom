@@ -1,7 +1,78 @@
 import { describe, expect, it } from 'vitest';
 import { buildCurveLut, createSpline, LUT_SIZE } from '../engine/curves';
 import { defaultParams } from '../engine/params';
-import { moriohParams, presetFromJson, presetToJson, sanitizeParams } from './presets';
+import { defaultGeometry } from '../engine/geometry';
+import {
+  DEFAULT_PRESET_ID,
+  NEUTRAL_ID,
+  blendPreset,
+  builtInPresets,
+  cyberpunkParams,
+  moriohParams,
+  presetFromJson,
+  presetToJson,
+  sanitizeParams,
+  tokyoGhoulParams,
+} from './presets';
+
+describe('anime presets', () => {
+  it('Cyberpunk: Edgerunners has the specified values', () => {
+    const p = cyberpunkParams();
+    expect(p.light).toEqual({ exposure: 0.4, contrast: 0, highlights: 30, shadows: 0, whites: 34, blacks: 0 });
+    expect(p.hsl.blue).toEqual({ hue: 15, sat: -25, lum: 5 });
+    expect(p.hsl.aqua).toEqual({ hue: -20, sat: 40, lum: -12 });
+    expect(p.hsl.red).toEqual({ hue: 0, sat: 0, lum: 0 });
+    expect(p.grading.shadows).toEqual({ hue: 285, sat: 35, lum: -10 });
+  });
+
+  it('Tokyo Ghoul has the specified values', () => {
+    const p = tokyoGhoulParams();
+    expect(p.light).toEqual({ exposure: -0.18, contrast: 24, highlights: -38, shadows: -30, whites: 12, blacks: -34 });
+    expect(p.hsl.red).toEqual({ hue: -6, sat: -12, lum: 7 });
+    expect(p.hsl.aqua).toEqual({ hue: -22, sat: -22, lum: -20 });
+    expect(p.hsl.purple).toEqual({ hue: 20, sat: 8, lum: -8 });
+    expect(p.hsl.magenta).toEqual({ hue: 20, sat: 8, lum: -8 });
+    expect(p.grading.highlights).toEqual({ hue: 346, sat: 10, lum: 2 });
+  });
+
+  it('are offered as built-ins and survive JSON', () => {
+    const names = builtInPresets().map((p) => p.name);
+    expect(names).toContain('Cyberpunk: Edgerunners');
+    expect(names).toContain('Tokyo Ghoul');
+    for (const p of [cyberpunkParams(), tokyoGhoulParams()]) {
+      expect(presetFromJson(presetToJson({ name: 'x', params: p })).params).toEqual(p);
+    }
+  });
+});
+
+describe('preset strength', () => {
+  const g = defaultGeometry();
+  it('is the preset itself at full strength', () => {
+    for (const p of [moriohParams(), cyberpunkParams(), tokyoGhoulParams()]) {
+      expect(blendPreset(p, 1, g)).toEqual(p);
+    }
+  });
+  it('changes no pixels at zero, apart from a grading hue with no saturation', () => {
+    const out = blendPreset(moriohParams(), 0, g);
+    const neutral = defaultParams();
+    expect(out.light).toEqual(neutral.light);
+    expect(out.hsl).toEqual(neutral.hsl);
+    expect(out.curve.rgb.every(([x, y]) => x === y)).toBe(true);
+    expect(out.grading.shadows.sat).toBe(0);
+  });
+  it('lands in between, and keeps the crop it is given', () => {
+    const crop = { ...g, x: 0.2, w: 0.5 };
+    const out = blendPreset(tokyoGhoulParams(), 0.5, crop);
+    expect(out.light.contrast).toBe(12);
+    expect(out.geometry).toEqual(crop);
+  });
+});
+
+describe('opening a photo', () => {
+  it('applies no look of its own', () => {
+    expect(DEFAULT_PRESET_ID).toBe(NEUTRAL_ID);
+  });
+});
 
 describe('Morioh preset', () => {
   const m = moriohParams();
