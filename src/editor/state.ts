@@ -154,20 +154,20 @@ export async function openFile(file: File): Promise<void> {
   setPhoto(decoded, file.name || 'photo', file.size);
 }
 
-export function openCanvas(canvas: HTMLCanvasElement, name: string): void {
-  setPhoto({ image: canvas, width: canvas.width, height: canvas.height }, name, 0);
+export function openCanvas(canvas: HTMLCanvasElement, name: string, docPatch: Partial<Doc> = {}): void {
+  setPhoto({ image: canvas, width: canvas.width, height: canvas.height }, name, 0, docPatch);
 }
 
-function setPhoto(decoded: Decoded, name: string, bytes: number): void {
+function setPhoto(decoded: Decoded, name: string, bytes: number, docPatch: Partial<Doc> = {}): void {
   closePhoto();
   const proxy = resizeTo(decoded.image, ...fitWithin(decoded.width, decoded.height, proxyEdge()));
   checkpointDoc = null;
   patch({
     photo: { source: decoded.image, width: decoded.width, height: decoded.height, proxy, name, bytes },
-    doc: defaultDoc(),
+    doc: { ...defaultDoc(), ...docPatch },
     past: [],
     future: [],
-    tool: 'frame',
+    tool: docPatch.format === 'original' ? 'filters' : 'frame',
     selected: null,
     editingText: null,
     exportOpen: false,

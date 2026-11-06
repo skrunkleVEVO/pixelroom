@@ -1164,3 +1164,95 @@ p {
     animation-duration: 1.6s !important;
   }
 }
+
+/* ------------------------------------------------------------ collage */
+
+.chip-hint {
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.6;
+}
+
+.layouts {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 2px 16px;
+  margin: 0 -16px;
+}
+
+.layouts::-webkit-scrollbar {
+  display: none;
+}
+
+.layout {
+  flex: none;
+  width: 58px;
+  height: 66px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--muted);
+  border: 2px solid transparent;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.layout.is-on {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.layout-add {
+  border: 2px dashed var(--surface-3);
+}
+
+.cell-actions {
+  flex-wrap: wrap;
+}
+
+.cell-actions .btn {
+  flex: 1;
+  padding: 0 10px;
+  font-size: 14px;
+}
+
+.btn.is-swapping {
+  background: #ffd60a;
+  color: #000;
+}
+
+.danger-text {
+  color: var(--danger);
+}
+
+.panel {
+  position: relative;
+}
+
+.panel-busy {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(24, 24, 28, 0.88);
+  font-weight: 600;
+}
+
+.error-banner.small {
+  font-size: 13px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+}
+
+@media (min-width: 900px) and (min-height: 560px) {
+  .panel .layouts {
+    flex-wrap: wrap;
+    overflow: visible;
+    margin: 0;
+    padding: 0;
+  }
+}

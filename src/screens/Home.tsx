@@ -7,14 +7,16 @@ import * as I from '../ui/Icons';
 interface Props {
   onEdit: (file: File) => void;
   onCompress: (files: File[]) => void;
+  onCollage: (files: File[]) => void;
   onSample: () => void;
   error: string | null;
 }
 
-export function Home({ onEdit, onCompress, onSample, error }: Props) {
+export function Home({ onEdit, onCompress, onCollage, onSample, error }: Props) {
   const editInput = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
   const compressInput = useRef<HTMLInputElement>(null);
+  const collageInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const install = useInstallMode();
   const touch = isTouchDevice();
@@ -79,6 +81,15 @@ export function Home({ onEdit, onCompress, onSample, error }: Props) {
               <small>Crop to 4:5, 9:16, 1:1 · filters · text</small>
             </span>
           </button>
+          <button className="action" onClick={() => collageInput.current?.click()}>
+            <span className="action-icon">
+              <I.Grid size={26} />
+            </span>
+            <span className="action-text">
+              <strong>Make a collage</strong>
+              <small>2–10 photos in one post</small>
+            </span>
+          </button>
           {touch && (
             <button className="action" onClick={() => cameraInput.current?.click()}>
               <span className="action-icon">
@@ -103,6 +114,18 @@ export function Home({ onEdit, onCompress, onSample, error }: Props) {
 
         <input ref={editInput} type="file" accept="image/*" hidden onChange={pickOne} />
         <input ref={cameraInput} type="file" accept="image/*" capture="environment" hidden onChange={pickOne} />
+        <input
+          ref={collageInput}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={(e) => {
+            const files = [...(e.target.files ?? [])].filter(isImageFile);
+            e.target.value = '';
+            if (files.length) onCollage(files);
+          }}
+        />
         <input
           ref={compressInput}
           type="file"

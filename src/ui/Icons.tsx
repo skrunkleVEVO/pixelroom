@@ -133,3 +133,11 @@ export const Phone = (p: P) => (
     <path d="M10.5 18.5h3" />
   </Icon>
 );
+export const Grid = (p: P) => (
+  <Icon {...p}>
+    <rect x="3" y="3" width="8" height="18" rx="1.5" />
+    <rect x="13" y="3" width="8" height="8" rx="1.5" />
+    <rect x="13" y="13" width="8" height="8" rx="1.5" />
+  </Icon>
+);
+export const Swap = (p: P) => <Icon {...p}><path d="M7 4L3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7" /></Icon>;

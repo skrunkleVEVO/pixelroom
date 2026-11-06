@@ -7,6 +7,7 @@ A quick, phone-first photo editor for Instagram, TikTok and stories, plus batch 
 - **Adjust**: Auto, plus brightness, contrast, saturation, warmth, tint, highlights, shadows, vibrance, fade, sharpen, vignette and grain.
 - **Text**: captions with six fonts, ten colours, plain/shadow/outline/label styles. Drag to move, pinch to resize and rotate; snaps to the centre.
 - **Save**: Social (1080 px short edge: 1080×1350, 1080×1920, 1920×1080…), HD (2×) or full resolution, as JPG, PNG or WebP, at a quality or under a file size (2 MB, 1 MB, 500 KB, 200 KB). Share straight to Photos, Instagram or TikTok through the share sheet, or download.
+- **Collage**: put 2–10 photos in one post. Pick from 3–6 layouts per photo count, any frame shape, spacing, rounded corners and background colour. Tap a photo to drag/pinch it inside its cell, swap it with another, replace or remove it. **Next** opens the collage in the editor for filters, text and saving.
 - **Compress**: pick any number of photos, choose a max size, format and quality or target size, then save them all at once (share sheet or a .zip). A file that's already smaller than the result is kept as it is.
 - Installable as an app, works offline, and on Android it shows up in the share menu so you can send photos to it from the gallery.
 
@@ -52,6 +53,8 @@ src/
     image.ts      Decoding (EXIF orientation) and high-quality resizing
     zip.ts        Minimal .zip writer for "Download all"
     save.ts       Share sheet and downloads
+  lib/collage.ts  Collage layouts, spacing/corners, drawing
+  collage/        Collage screen: state and undo, live preview with gestures
   editor/         State and undo, live preview with gestures, tool panels, save sheet
   screens/        Home and Compress
   shareTarget.ts  Photos shared in from Android's share menu
