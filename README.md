@@ -1,8 +1,16 @@
 # PixelRoom
 
-A non-destructive photo editor for desktop and mobile browsers, running on WebGL2 fragment shaders, with a Library and Develop workspace in the style of pro photo editors. Photos stay on the device: there is no server and no upload.
+A quick, phone-first photo editor for Instagram, TikTok and stories, plus batch compression. Everything runs in the browser: photos are never uploaded.
 
-PixelRoom is an independent project. It is not affiliated with or endorsed by Adobe.
+- **Frame**: 4:5 post, 1:1, 9:16 story/TikTok, 3:4, 16:9, 1.91:1 or the original shape. *Fill* crops (drag and pinch to position); *Fit* keeps the whole photo on a blurred or coloured background with an optional border. Rotate, flip, straighten.
+- **Filters**: 17 one-tap looks with a strength slider.
+- **Adjust**: Auto, plus brightness, contrast, saturation, warmth, tint, highlights, shadows, vibrance, fade, sharpen, vignette and grain.
+- **Text**: captions with six fonts, ten colours, plain/shadow/outline/label styles. Drag to move, pinch to resize and rotate; snaps to the centre.
+- **Save**: Social (1080 px short edge: 1080×1350, 1080×1920, 1920×1080…), HD (2×) or full resolution, as JPG, PNG or WebP, at a quality or under a file size (2 MB, 1 MB, 500 KB, 200 KB). Share straight to Photos, Instagram or TikTok through the share sheet, or download.
+- **Compress**: pick any number of photos, choose a max size, format and quality or target size, then save them all at once (share sheet or a .zip). A file that's already smaller than the result is kept as it is.
+- Installable as an app, works offline, and on Android it shows up in the share menu so you can send photos to it from the gallery.
+
+Saved files never contain location or camera data.
 
 ## Run
 
@@ -13,113 +21,42 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173. To try it on a phone, open the "Network" URL Vite prints while on the same Wi-Fi.
+Open http://localhost:5173. To try it on a phone, open the "Network" URL Vite prints while on the same Wi-Fi. (Installing and the share menu need HTTPS, so they only work on the hosted site.)
 
 | Command | What it does |
 | --- | --- |
-| `npm run build` | Type-checks and builds static files into `dist/`, which any static host can serve |
+| `npm run build` | Type-checks and builds static files into `dist/` |
 | `npm run preview` | Serves the `dist/` build locally |
-| `npm test` | Runs the unit tests for presets and curve math |
+| `npm test` | Unit tests for layout math, looks, encoding, zip |
 
 ## Install on a phone
 
-Open the site, then add it to your home screen. It then launches full screen and works offline.
-
-- **iPhone or iPad:** open it in Safari, tap Share, then Add to Home Screen.
+- **iPhone or iPad:** open the site in Safari, tap Share, then Add to Home Screen.
 - **Android:** tap Install app on the start screen, or use the browser menu.
-
-Phones get a simpler interface: Looks for one-tap presets with a Strength slider, Adjust for one big slider at a time, Crop, and More for every desktop panel. Export takes two taps and offers the system share sheet, which is how a photo reaches the iPhone's Photos app. Installing needs HTTPS, so it works on the hosted site, not over the local network URL.
 
 ## Hosting on GitHub Pages
 
-Every push to `main` runs the tests, builds the app and deploys it to GitHub Pages. To turn this on once, make the repository public (a free GitHub plan requires it for Pages), then go to **Settings → Pages** and set **Source** to **GitHub Actions**. Re-run the workflow from the **Actions** tab, and the app will be live at `https://<your-username>.github.io/pixelroom/`.
-
-The site only serves the app's code. Photos are still processed on the device and never uploaded.
-
-## Controls
-
-| Action | Mouse / keyboard | Touch |
-| --- | --- | --- |
-| Library / Develop | `G` / `D` | Develop only |
-| Before / After | Toolbar button, or `Y` | Top bar button |
-| Peek at the original | Hold the toolbar button or the photo, or hold `\` | Long-press the photo |
-| Fit / 1:1 at that spot | Click the photo, or `Z` | Double-tap |
-| Zoom / pan | Wheel, Navigator buttons / drag | Pinch / drag |
-| Crop and straighten | `R` | Crop tab |
-| White balance picker | `W`, then click something neutral | Picker button, then tap |
-| Show clipping | `J` | |
-| Reset a slider | Double-click it | Double-tap it |
-| Type an exact value | Click the number | Tap the number |
-| Undo / redo | `Ctrl+Z` / `Ctrl+Shift+Z`, or the History panel | Top bar buttons |
-| Copy / paste settings | `Ctrl+Shift+C` / `Ctrl+Shift+V` | |
-| Previous / next photo | Left / right arrow | |
-| Rate / flag | `0`-`5` / `P`, `X`, `U` | |
-| Import / export | `Ctrl+Shift+I` / `Ctrl+Shift+E` | Top bar buttons |
-| Hide panels / everything / dim | `Tab` / `Shift+Tab` / `L` | |
-| Curve points | Click to add, drag to move, double-click to remove | Same, with taps |
+Every push to `main` runs the tests, builds and deploys to GitHub Pages (Settings → Pages → Source: GitHub Actions). The site only serves the app's code.
 
 ## How it works
 
 ```
 src/
-  engine/
-    params.ts        EditParams: the serialisable edit, plus every slider range
-    curves.ts        Monotone cubic splines, baked into a 1024-entry float LUT
-    geometry.ts      Crop, straighten, rotate, flip: output to source mapping
-    view.ts          Zoom and pan, snapped to whole device pixels
-    auto.ts          Auto Tone, Auto White Balance, the white balance picker
-    metadata.ts      Reads EXIF and makes it true of the exported file
-    encodeWorker.ts  MozJPEG encoding off the main thread
-    shaders.ts       All GLSL, with the pipeline order documented at the top
-    Renderer.ts      WebGL2 context, textures, viewport drawing, tiled export
-  presets/
-    presets.ts       Morioh, Neutral, JSON format, validation of imported files
-    presets.test.ts  Exact Morioh values, import rules, spline behaviour
-  state/
-    store.ts         Small external store: catalog, params, history, presets, UI state
-    editor.ts        Connects the store to the renderer; imports and exports files
-  components/        Viewer, CropOverlay, Workspace, panels, Slider, CurveEditor, ExportDialog, Icons
-  sample.ts          Procedural test scene, used by "Use sample scene"
-  App.tsx            Layout: side panels and filmstrip on desktop, tabs on phones
+  lib/
+    adjust.ts     Adjustments, filters, how they combine, Auto
+    processor.ts  WebGL colour pass (one shader) for preview and export
+    layout.ts     Formats, fill/fit placement, pan clamping, output sizes
+    compose.ts    Draws a frame: background, photo, vignette, grain, text
+    text.ts       Text layers: fonts, styles, drawing, hit-testing
+    encode.ts     JPG/PNG/WebP encoding and "fit under N KB"
+    image.ts      Decoding (EXIF orientation) and high-quality resizing
+    zip.ts        Minimal .zip writer for "Download all"
+    save.ts       Share sheet and downloads
+  editor/         State and undo, live preview with gestures, tool panels, save sheet
+  screens/        Home and Compress
+  shareTarget.ts  Photos shared in from Android's share menu
 ```
 
-**Non-destructive.** The decoded original is kept unchanged in memory. An edit is only an `EditParams` object, and each frame re-runs the shader from the original pixels. An unedited photo exports bit-exact as PNG.
+The original photo is never modified; an edit is a small object that's re-applied for every preview frame and for export. Preview and export run the same code, so text, grain and vignettes look identical at any size. Export only processes as many photo pixels as the output needs, and output is capped at 16 megapixels, which is what iOS Safari reliably allows.
 
-**Sharp preview.** The canvas matches the stage in device pixels and the shader draws straight into it, so the browser never rescales the picture. While you interact, a mipmapped proxy (long edge up to 2560 px, or 1600 px on touch devices) answers instantly. When the view settles it is replaced by a texture made for that exact scale: an anti-aliased reduction when zoomed out, the original pixels at 1:1 and beyond. At 1:1 each source pixel lands on exactly one screen pixel.
-
-**Fast slider drags.** Slider changes go from the store straight to the renderer without a React render, and several changes in one frame collapse into one draw. Only one shader pass runs per frame because the blurs used by Texture, Clarity, Dehaze and the Highlights/Shadows masks are built once per photo.
-
-**Export quality.** Export renders the original in 2048 px tiles, so photos larger than the GPU's texture limit still work. Preview and export share the same blur textures, and sharpening works in source pixels, so judge it at 1:1. JPEGs are encoded with MozJPEG at 4:4:4, because browser canvas encoders use 4:2:0 chroma below quality 100, which smears saturated edges. Do not resize with `createImageBitmap`'s `resizeQuality`: Chrome's result aliases badly on large reductions.
-
-**Pipeline order.** Noise reduction first. White balance, dehaze and exposure run in linear light. Then, in display space: highlights, shadows, whites, blacks, texture, clarity, sharpening, contrast, tone curve, HSL mixer, vibrance, saturation, black and white, color grading, vignette, grain.
-
-The slider responses are PixelRoom's own approximations, so a given value will not match Lightroom's output exactly.
-
-## Preset JSON
-
-```json
-{
-  "format": "pixelroom-preset",
-  "version": 1,
-  "name": "My Look",
-  "params": {
-    "light": { "exposure": 0.2, "contrast": 25 },
-    "curve": { "rgb": [[0, 8], [128, 132], [255, 255]] },
-    "hsl": { "yellow": { "hue": -35, "sat": 45, "lum": 15 } }
-  }
-}
-```
-
-Groups are `mono`, `light`, `color`, `presence`, `curve`, `hsl`, `grading`, `detail`, `effects` and `geometry`. Missing values fall back to neutral and out-of-range numbers are clamped, so partial presets are valid. Applying a preset never changes the crop.
-
-Photos open unedited. To open them with a look instead, set `DEFAULT_PRESET_ID` in `src/presets/presets.ts`.
-
-## Limits
-
-- **Camera RAW files (CR2, NEF, ARW, DNG) cannot be opened.** Browsers do not decode them, so input is whatever the browser can decode: JPEG, PNG, WebP, AVIF, and HEIC on Safari. A RAW decoder such as a LibRaw WebAssembly build would be a separate addition.
-- **Editing is 8-bit sRGB,** because browsers decode images that way. Blown highlights in the file cannot be recovered, and wide-gamut photos (Display P3, Adobe RGB) are converted to sRGB on import, which clips their most saturated colors.
-- **Metadata is kept only in JPEG exports from JPEG originals.** Orientation, dimensions and the embedded thumbnail are corrected. Location is removed by default.
-- **The catalog lasts for the session.** Reloading the page clears imported photos and their edits. User presets are saved.
-- **No masking, healing, red eye, lens corrections or perspective tools.**
-- **Clarity, Texture and Shadows can halo at extreme values** around hard, high-contrast edges, because they use a plain blur rather than an edge-aware filter.
-- **Very large exports can hit browser canvas limits,** which are lowest on iOS Safari. The largest size that works depends on the device.
+**Limits:** RAW camera files can't be opened (browsers don't decode them). WebP saving isn't available on Safari, so the option is hidden there.

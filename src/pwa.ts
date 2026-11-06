@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { isIos } from './lib/save';
 
 // Installing to the home screen. Android hands us a prompt to trigger; iOS has no such
 // API, so there we can only explain the Share menu step.
@@ -20,9 +21,6 @@ function isStandalone(): boolean {
   );
 }
 
-function isIos(): boolean {
-  return /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-}
 
 function currentMode(): InstallMode {
   if (installed || isStandalone()) return 'installed';

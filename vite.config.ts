@@ -32,8 +32,5 @@ export default defineConfig({
   // Relative base so `dist/` can be dropped onto any static host or sub-path.
   base: './',
   plugins: [react(), serviceWorker()],
-  worker: { format: 'es' },
-  // The encoder loads its wasm by URL relative to itself; pre-bundling would break that.
-  optimizeDeps: { exclude: ['@jsquash/jpeg'] },
   server: { host: true, port: 5173 },
 });
